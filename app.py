@@ -3,6 +3,12 @@ import unicodedata
 import requests
 import pandas as pd
 import streamlit as st
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from datetime import datetime
 
 # =========================
 # CONFIG GERAL + TEMA
@@ -15,14 +21,14 @@ st.set_page_config(
 )
 
 # Paleta baseada no TOP Preços: azuis e verdes
-PRIMARY = "#4A90A4"      # Azul principal
-SECONDARY = "#5BA05B"    # Verde
-ACCENT = "#6BB6FF"       # Azul mais claro
-BG = "#1C1C1C"           # Fundo escuro
-CARD = "#2A2A2A"         # Cards em cinza escuro
-TEXT = "#FFFFFF"         # Texto branco
-MUTED = "#B0B0B0"        # Texto mais suave
-ECONOMY = "#4CAF50"      # Verde para disponível
+PRIMARY = "#4A90A4"
+SECONDARY = "#5BA05B"
+ACCENT = "#6BB6FF"
+BG = "#1C1C1C"
+CARD = "#2A2A2A"
+TEXT = "#FFFFFF"
+MUTED = "#B0B0B0"
+ECONOMY = "#4CAF50"
 
 # URL da planilha
 DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTQuWn9iSZkiuiaA5--9CSqfJ6NBxrCK_ClWfKH_es49sSWQkVEvkIB0h6Ow0EKZkHBwhN7IveSW7LR/pub?gid=1059501700&single=true&output=csv"
@@ -211,13 +217,6 @@ html, body, [data-testid="stAppViewContainer"] {{
   text-align: center;
 }}
 
-.quantity-controls {{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-}}
-
 .block-container {{
   padding: 20px !important;
   max-width: 100% !important;
@@ -302,6 +301,97 @@ def padronizar_colunas(df: pd.DataFrame) -> pd.DataFrame:
     df["produto_norm"] = df["Produto"].apply(norm)
     return df
 
+def generate_pdf(selected_products):
+    """Gera PDF com lista de compras"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    
+    # Estilos
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        textColor=colors.HexColor('#4A90A4'),
+        alignment=1,  # CENTER
+        spaceAfter=20
+    )
+    
+    # Elementos do PDF
+    elements = []
+    
+    # Título
+    title = Paragraph("TOP Preços - Lista de Compras", title_style)
+    elements.append(title)
+    
+    # Data
+    date = Paragraph(f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal'])
+    elements.append(date)
+    elements.append(Spacer(1, 20))
+    
+    # Agrupa por fornecedor
+    produtos_por_fornecedor = {}
+    total_geral = 0
+    
+    for key, item in selected_products.items():
+        fornecedor = item['Mercado']
+        if fornecedor not in produtos_por_fornecedor:
+            produtos_por_fornecedor[fornecedor] = []
+        produtos_por_fornecedor[fornecedor].append(item)
+        total_geral += item['Valor'] * item['Quantidade']
+    
+    # Para cada fornecedor
+    for fornecedor, produtos in produtos_por_fornecedor.items():
+        # Header do fornecedor
+        fornecedor_title = Paragraph(f"<b>{fornecedor}</b>", styles['Heading2'])
+        elements.append(fornecedor_title)
+        
+        # Tabela de produtos
+        data = [['Produto', 'Qtd', 'Valor Unit.', 'Subtotal']]
+        
+        total_fornecedor = 0
+        for produto in produtos:
+            subtotal = produto['Valor'] * produto['Quantidade']
+            total_fornecedor += subtotal
+            
+            data.append([
+                produto['Produto'],
+                str(produto['Quantidade']),
+                format_brl(produto['Valor']),
+                format_brl(subtotal)
+            ])
+        
+        # Adiciona total do fornecedor
+        data.append(['', '', 'Total:', format_brl(total_fornecedor)])
+        
+        # Cria tabela
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A90A4')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -2), colors.beige),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#5BA05B')),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.whitesmoke),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        elements.append(table)
+        elements.append(Spacer(1, 20))
+    
+    # Total geral
+    total_para = Paragraph(f"<b>TOTAL GERAL: {format_brl(total_geral)}</b>", styles['Heading2'])
+    elements.append(total_para)
+    
+    # Gera PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 def render_cards_mobile(df_view: pd.DataFrame):
     for _, row in df_view.iterrows():
         st.markdown(f"""
@@ -324,9 +414,10 @@ def render_cards_with_selection(df_view: pd.DataFrame):
             col1, col2 = st.columns([0.1, 0.9])
             
             with col1:
-                # Verifica se produto já está selecionado
                 product_key = f"{row['Produto']}_{row['Mercado']}"
-                selected = st.checkbox("", key=f"product_{idx}", label_visibility="collapsed")
+                # Verifica se já está selecionado
+                is_selected = 'selected_products' in st.session_state and product_key in st.session_state.selected_products
+                selected = st.checkbox("", value=is_selected, key=f"product_{idx}", label_visibility="collapsed")
                 
             with col2:
                 st.markdown(f"""
@@ -348,12 +439,13 @@ def render_cards_with_selection(df_view: pd.DataFrame):
                 if 'selected_products' not in st.session_state:
                     st.session_state.selected_products = {}
                 
-                st.session_state.selected_products[product_key] = {
-                    'Produto': row['Produto'],
-                    'Mercado': row['Mercado'],
-                    'Valor': row['Valor'],
-                    'Quantidade': 1
-                }
+                if product_key not in st.session_state.selected_products:
+                    st.session_state.selected_products[product_key] = {
+                        'Produto': row['Produto'],
+                        'Mercado': row['Mercado'],
+                        'Valor': row['Valor'],
+                        'Quantidade': 1
+                    }
             else:
                 if 'selected_products' in st.session_state and product_key in st.session_state.selected_products:
                     del st.session_state.selected_products[product_key]
@@ -459,13 +551,28 @@ with tab3:
         # Calcula valor total considerando quantidades
         total_value = sum(item['Valor'] * item['Quantidade'] for item in selected_products.values())
         
-        # Card com valor total
-        st.markdown(f"""
-        <div class="total-card">
-            <span class="total-value">{format_brl(total_value)}</span>
-            <div class="total-label">Total da Compra</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Card com valor total e botão de exportar
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.markdown(f"""
+            <div class="total-card">
+                <span class="total-value">{format_brl(total_value)}</span>
+                <div class="total-label">Total da Compra</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            if st.button("📄 Exportar Lista em PDF", use_container_width=True, type="primary"):
+                pdf_buffer = generate_pdf(selected_products)
+                st.download_button(
+                    label="⬇ Baixar PDF",
+                    data=pdf_buffer,
+                    file_name=f"lista_compras_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
         
         # Agrupa por fornecedor
         produtos_por_fornecedor = {}
@@ -479,50 +586,42 @@ with tab3:
         st.markdown(f"### 🛒 Seus Produtos ({len(selected_products)} itens)")
         
         for fornecedor, produtos in produtos_por_fornecedor.items():
-            # Header do fornecedor
-            st.markdown(f'<div class="supplier-header">🏪 {fornecedor}</div>', unsafe_allow_html=True)
+            # Header do fornecedor (sem emoji)
+            st.markdown(f'<div class="supplier-header">{fornecedor}</div>', unsafe_allow_html=True)
             
             for product_key, item in produtos:
-                col1, col2 = st.columns([0.85, 0.15])
+                # Calcula subtotal
+                subtotal = item['Valor'] * item['Quantidade']
                 
-                with col1:
-                    # Calcula subtotal
-                    subtotal = item['Valor'] * item['Quantidade']
-                    
-                    st.markdown(f"""
-                    <div class="product-card">
-                        <div class="product-name">{item['Produto']}</div>
-                        <div class="supplier-info">
-                            <span class="supplier-label">Valor Unit.</span>
-                            <span style="color: var(--muted); font-size: 1.05rem; font-weight: 500;">{format_brl(item['Valor'])}</span>
-                        </div>
-                        <div class="price-container">
-                            <span class="price-value">{format_brl(subtotal)}</span>
-                            <span class="available-badge">✅ Selecionado</span>
-                        </div>
+                st.markdown(f"""
+                <div class="product-card">
+                    <div class="product-name">{item['Produto']}</div>
+                    <div class="supplier-info">
+                        <span class="supplier-label">Valor Unit.</span>
+                        <span style="color: var(--muted); font-size: 1.05rem; font-weight: 500;">{format_brl(item['Valor'])}</span>
                     </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Controles de quantidade
-                    col_qty1, col_qty2, col_qty3, col_qty4 = st.columns([1, 1, 1, 1])
-                    
-                    with col_qty1:
-                        if st.button("➖", key=f"minus_{product_key}"):
-                            if item['Quantidade'] > 1:
-                                st.session_state.selected_products[product_key]['Quantidade'] -= 1
-                                st.rerun()
-                    
-                    with col_qty2:
-                        st.write(f"*Qtd: {item['Quantidade']}*")
-                    
-                    with col_qty3:
-                        if st.button("➕", key=f"plus_{product_key}"):
-                            st.session_state.selected_products[product_key]['Quantidade'] += 1
+                    <div class="price-container">
+                        <span class="price-value">{format_brl(subtotal)}</span>
+                        <span class="available-badge">✅ Selecionado</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Controles de quantidade
+                col_qty1, col_qty2, col_qty3 = st.columns([1, 2, 1])
+                
+                with col_qty1:
+                    if st.button("➖", key=f"minus_{product_key}", help="Diminuir quantidade"):
+                        if item['Quantidade'] > 1:
+                            st.session_state.selected_products[product_key]['Quantidade'] -= 1
                             st.rerun()
                 
-                with col2:
-                    if st.button("🗑", key=f"remove_{product_key}", help="Remover item"):
-                        del st.session_state.selected_products[product_key]
+                with col_qty2:
+                    st.markdown(f"<div style='text-align: center; padding: 8px; font-weight: bold; font-size: 1.1rem;'>Quantidade: {item['Quantidade']}</div>", unsafe_allow_html=True)
+                
+                with col_qty3:
+                    if st.button("➕", key=f"plus_{product_key}", help="Aumentar quantidade"):
+                        st.session_state.selected_products[product_key]['Quantidade'] += 1
                         st.rerun()
 
 st.markdown("---")
