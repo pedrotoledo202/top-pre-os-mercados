@@ -200,6 +200,24 @@ html, body, [data-testid="stAppViewContainer"] {{
   text-transform: uppercase;
 }}
 
+.supplier-header {{
+  background: var(--primary);
+  color: white;
+  padding: 15px 20px;
+  border-radius: 12px;
+  margin: 25px 0 15px 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  text-align: center;
+}}
+
+.quantity-controls {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}}
+
 .block-container {{
   padding: 20px !important;
   max-width: 100% !important;
@@ -306,6 +324,8 @@ def render_cards_with_selection(df_view: pd.DataFrame):
             col1, col2 = st.columns([0.1, 0.9])
             
             with col1:
+                # Verifica se produto já está selecionado
+                product_key = f"{row['Produto']}_{row['Mercado']}"
                 selected = st.checkbox("", key=f"product_{idx}", label_visibility="collapsed")
                 
             with col2:
@@ -323,29 +343,20 @@ def render_cards_with_selection(df_view: pd.DataFrame):
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Salva produto selecionado no session state
+            # Gerencia seleção no session state
             if selected:
                 if 'selected_products' not in st.session_state:
-                    st.session_state.selected_products = []
+                    st.session_state.selected_products = {}
                 
-                product_data = {
+                st.session_state.selected_products[product_key] = {
                     'Produto': row['Produto'],
                     'Mercado': row['Mercado'],
-                    'Valor': row['Valor']
+                    'Valor': row['Valor'],
+                    'Quantidade': 1
                 }
-                
-                if product_data not in st.session_state.selected_products:
-                    st.session_state.selected_products.append(product_data)
             else:
-                # Remove produto se desmarcado
-                if 'selected_products' in st.session_state:
-                    product_data = {
-                        'Produto': row['Produto'],
-                        'Mercado': row['Mercado'],
-                        'Valor': row['Valor']
-                    }
-                    if product_data in st.session_state.selected_products:
-                        st.session_state.selected_products.remove(product_data)
+                if 'selected_products' in st.session_state and product_key in st.session_state.selected_products:
+                    del st.session_state.selected_products[product_key]
 
 # =========================
 # CARREGAMENTO DE DADOS
@@ -415,14 +426,6 @@ with tab2:
     busca_lista = st.text_input("🔍 Pesquisar produto", placeholder="Digite o nome do produto (ex: Arroz, Feijão, Óleo...)", key="search_list")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Botão para acessar lista de compras
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        selected_count = len(st.session_state.get('selected_products', []))
-        if st.button(f"🛒 Acessar Minha Lista ({selected_count} itens)", use_container_width=True, type="primary"):
-            st.session_state.active_tab = 2  # Vai para aba "Lista de Compras"
-            st.rerun()
-    
     # Filtra resultados
     if busca_lista:
         resultado_lista = df[df["produto_norm"].str.contains(norm(busca_lista), na=False)]
@@ -452,7 +455,9 @@ with tab3:
         """, unsafe_allow_html=True)
     else:
         selected_products = st.session_state.selected_products
-        total_value = sum(item['Valor'] for item in selected_products)
+        
+        # Calcula valor total considerando quantidades
+        total_value = sum(item['Valor'] * item['Quantidade'] for item in selected_products.values())
         
         # Card com valor total
         st.markdown(f"""
@@ -462,31 +467,63 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
         
-        # Lista dos produtos selecionados
+        # Agrupa por fornecedor
+        produtos_por_fornecedor = {}
+        for key, item in selected_products.items():
+            fornecedor = item['Mercado']
+            if fornecedor not in produtos_por_fornecedor:
+                produtos_por_fornecedor[fornecedor] = []
+            produtos_por_fornecedor[fornecedor].append((key, item))
+        
+        # Exibe produtos agrupados por fornecedor
         st.markdown(f"### 🛒 Seus Produtos ({len(selected_products)} itens)")
         
-        for i, item in enumerate(selected_products):
-            col1, col2 = st.columns([0.9, 0.1])
+        for fornecedor, produtos in produtos_por_fornecedor.items():
+            # Header do fornecedor
+            st.markdown(f'<div class="supplier-header">🏪 {fornecedor}</div>', unsafe_allow_html=True)
             
-            with col1:
-                st.markdown(f"""
-                <div class="product-card">
-                    <div class="product-name">{item['Produto']}</div>
-                    <div class="supplier-info">
-                        <span class="supplier-label">Comprar em</span>
-                        <span style="color: var(--muted); font-size: 1.05rem; font-weight: 500;">{item['Mercado']}</span>
+            for product_key, item in produtos:
+                col1, col2 = st.columns([0.85, 0.15])
+                
+                with col1:
+                    # Calcula subtotal
+                    subtotal = item['Valor'] * item['Quantidade']
+                    
+                    st.markdown(f"""
+                    <div class="product-card">
+                        <div class="product-name">{item['Produto']}</div>
+                        <div class="supplier-info">
+                            <span class="supplier-label">Valor Unit.</span>
+                            <span style="color: var(--muted); font-size: 1.05rem; font-weight: 500;">{format_brl(item['Valor'])}</span>
+                        </div>
+                        <div class="price-container">
+                            <span class="price-value">{format_brl(subtotal)}</span>
+                            <span class="available-badge">✅ Selecionado</span>
+                        </div>
                     </div>
-                    <div class="price-container">
-                        <span class="price-value">{format_brl(item['Valor'])}</span>
-                        <span class="available-badge">✅ Selecionado</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                if st.button("🗑", key=f"remove_{i}", help="Remover item"):
-                    st.session_state.selected_products.remove(item)
-                    st.rerun()
+                    """, unsafe_allow_html=True)
+                    
+                    # Controles de quantidade
+                    col_qty1, col_qty2, col_qty3, col_qty4 = st.columns([1, 1, 1, 1])
+                    
+                    with col_qty1:
+                        if st.button("➖", key=f"minus_{product_key}"):
+                            if item['Quantidade'] > 1:
+                                st.session_state.selected_products[product_key]['Quantidade'] -= 1
+                                st.rerun()
+                    
+                    with col_qty2:
+                        st.write(f"*Qtd: {item['Quantidade']}*")
+                    
+                    with col_qty3:
+                        if st.button("➕", key=f"plus_{product_key}"):
+                            st.session_state.selected_products[product_key]['Quantidade'] += 1
+                            st.rerun()
+                
+                with col2:
+                    if st.button("🗑", key=f"remove_{product_key}", help="Remover item"):
+                        del st.session_state.selected_products[product_key]
+                        st.rerun()
 
 st.markdown("---")
 st.markdown("""
