@@ -24,10 +24,10 @@ TEXT = "#FFFFFF"         # Texto branco
 MUTED = "#B0B0B0"        # Texto mais suave
 ECONOMY = "#4CAF50"      # Verde para disponível
 
-# URL da planilha atualizada
+# URL da planilha
 DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTQuWn9iSZkiuiaA5--9CSqfJ6NBxrCK_ClWfKH_es49sSWQkVEvkIB0h6Ow0EKZkHBwhN7IveSW7LR/pub?gid=1059501700&single=true&output=csv"
 
-# CSS com a mesma identidade visual do TOP Preços
+# CSS
 st.markdown(f"""
 <style>
 :root {{
@@ -90,12 +90,6 @@ html, body, [data-testid="stAppViewContainer"] {{
   padding: 15px 20px !important;
   font-size: 1.1rem !important;
   font-weight: 500 !important;
-}}
-
-.stTextInput > div > div > input:focus {{
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 0 3px rgba(107, 182, 255, 0.2) !important;
-  outline: none !important;
 }}
 
 .product-card {{
@@ -178,6 +172,32 @@ html, body, [data-testid="stAppViewContainer"] {{
   font-weight: 800;
   color: var(--primary);
   text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+}}
+
+.total-card {{
+  background: var(--card);
+  padding: 30px;
+  border-radius: 20px;
+  text-align: center;
+  border: 2px solid var(--economy);
+  box-shadow: 0 8px 25px rgba(76, 175, 80, 0.15);
+  margin: 30px auto;
+  max-width: 400px;
+}}
+
+.total-value {{
+  font-size: 3rem;
+  font-weight: 900;
+  color: var(--economy);
+  display: block;
+  margin-bottom: 10px;
+}}
+
+.total-label {{
+  color: var(--muted);
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-transform: uppercase;
 }}
 
 .block-container {{
@@ -280,18 +300,56 @@ def render_cards_mobile(df_view: pd.DataFrame):
         </div>
         """, unsafe_allow_html=True)
 
-# =========================
-# INTERFACE PRINCIPAL
-# =========================
+def render_cards_with_selection(df_view: pd.DataFrame):
+    for idx, row in df_view.iterrows():
+        with st.container():
+            col1, col2 = st.columns([0.1, 0.9])
+            
+            with col1:
+                selected = st.checkbox("", key=f"product_{idx}", label_visibility="collapsed")
+                
+            with col2:
+                st.markdown(f"""
+                <div class="product-card">
+                    <div class="product-name">{row['Produto']}</div>
+                    <div class="supplier-info">
+                        <span class="supplier-label">Supermercado</span>
+                        <span style="color: var(--muted); font-size: 1.05rem; font-weight: 500;">{row['Mercado']}</span>
+                    </div>
+                    <div class="price-container">
+                        <span class="price-value">{format_brl(row['Valor'])}</span>
+                        <span class="available-badge">✅ Disponível</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Salva produto selecionado no session state
+            if selected:
+                if 'selected_products' not in st.session_state:
+                    st.session_state.selected_products = []
+                
+                product_data = {
+                    'Produto': row['Produto'],
+                    'Mercado': row['Mercado'],
+                    'Valor': row['Valor']
+                }
+                
+                if product_data not in st.session_state.selected_products:
+                    st.session_state.selected_products.append(product_data)
+            else:
+                # Remove produto se desmarcado
+                if 'selected_products' in st.session_state:
+                    product_data = {
+                        'Produto': row['Produto'],
+                        'Mercado': row['Mercado'],
+                        'Valor': row['Valor']
+                    }
+                    if product_data in st.session_state.selected_products:
+                        st.session_state.selected_products.remove(product_data)
 
-st.markdown("""
-<div class="main-header">
-    <h1>🏆 TOP Preços</h1>
-    <div class="subtitle">Compare preços entre supermercados e economize</div>
-</div>
-""", unsafe_allow_html=True)
-
-# Carrega dados
+# =========================
+# CARREGAMENTO DE DADOS
+# =========================
 try:
     df_raw = load_from_google_sheets(DATA_URL)
     if df_raw.empty:
@@ -303,37 +361,132 @@ try:
         st.error("Erro ao processar dados da planilha.")
         st.stop()
         
-    st.success("✅ Dados carregados com sucesso!")
-    
 except Exception as e:
     st.error(f"❌ Erro ao carregar dados: {e}")
     st.stop()
 
-# Container de busca
-st.markdown('<div class="search-container">', unsafe_allow_html=True)
-busca = st.text_input("🔍 Pesquisar produto", placeholder="Digite o nome do produto (ex: Arroz, Feijão, Óleo...)")
-st.markdown('</div>', unsafe_allow_html=True)
+# =========================
+# INTERFACE PRINCIPAL
+# =========================
 
-# Filtra resultados
-if busca:
-    resultado = df[df["produto_norm"].str.contains(norm(busca), na=False)]
-else:
-    resultado = df.copy()
+st.markdown("""
+<div class="main-header">
+    <h1>🏆 TOP Preços</h1>
+    <div class="subtitle">Compare preços entre supermercados e economize</div>
+</div>
+""", unsafe_allow_html=True)
 
-# Exibição dos resultados
-if resultado.empty:
-    st.markdown("""
-    <div style="text-align: center; padding: 40px; background: var(--card); border-radius: 15px; margin: 20px 0;">
-        <h3 style="color: var(--muted);">🔍 Nenhum produto encontrado</h3>
-        <p style="color: var(--muted);">Tente buscar por outro termo ou verifique a ortografia.</p>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    # Ordenar por produto e depois por preço
-    resultado = resultado.sort_values(['Produto', 'Valor'])
+# Navegação por abas
+tab1, tab2, tab3 = st.tabs(["🏠 Página Principal", "📝 Minha Lista", "🛒 Lista de Compras"])
+
+with tab1:
+    st.success("✅ Dados carregados com sucesso!")
     
-    st.markdown(f"### 📋 Lista de Preços ({len(resultado)} produtos)")
-    render_cards_mobile(resultado[["Produto", "Mercado", "Valor", "produto_norm"]])
+    # Container de busca
+    st.markdown('<div class="search-container">', unsafe_allow_html=True)
+    busca_principal = st.text_input("🔍 Pesquisar produto", placeholder="Digite o nome do produto (ex: Arroz, Feijão, Óleo...)", key="search_main")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Filtra resultados
+    if busca_principal:
+        resultado_principal = df[df["produto_norm"].str.contains(norm(busca_principal), na=False)]
+    else:
+        resultado_principal = df.copy()
+    
+    # Exibição dos resultados
+    if resultado_principal.empty:
+        st.markdown("""
+        <div style="text-align: center; padding: 40px; background: var(--card); border-radius: 15px; margin: 20px 0;">
+            <h3 style="color: var(--muted);">🔍 Nenhum produto encontrado</h3>
+            <p style="color: var(--muted);">Tente buscar por outro termo ou verifique a ortografia.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        resultado_principal = resultado_principal.sort_values(['Produto', 'Valor'])
+        st.markdown(f"### 📋 Lista de Preços ({len(resultado_principal)} produtos)")
+        render_cards_mobile(resultado_principal[["Produto", "Mercado", "Valor", "produto_norm"]])
+
+with tab2:
+    st.success("✅ Dados carregados com sucesso!")
+    st.info("💡 Selecione os produtos que deseja comprar marcando as caixas ao lado de cada item.")
+    
+    # Container de busca
+    st.markdown('<div class="search-container">', unsafe_allow_html=True)
+    busca_lista = st.text_input("🔍 Pesquisar produto", placeholder="Digite o nome do produto (ex: Arroz, Feijão, Óleo...)", key="search_list")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Botão para acessar lista de compras
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        selected_count = len(st.session_state.get('selected_products', []))
+        if st.button(f"🛒 Acessar Minha Lista ({selected_count} itens)", use_container_width=True, type="primary"):
+            st.session_state.active_tab = 2  # Vai para aba "Lista de Compras"
+            st.rerun()
+    
+    # Filtra resultados
+    if busca_lista:
+        resultado_lista = df[df["produto_norm"].str.contains(norm(busca_lista), na=False)]
+    else:
+        resultado_lista = df.copy()
+    
+    # Exibição dos resultados com seleção
+    if resultado_lista.empty:
+        st.markdown("""
+        <div style="text-align: center; padding: 40px; background: var(--card); border-radius: 15px; margin: 20px 0;">
+            <h3 style="color: var(--muted);">🔍 Nenhum produto encontrado</h3>
+            <p style="color: var(--muted);">Tente buscar por outro termo ou verifique a ortografia.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        resultado_lista = resultado_lista.sort_values(['Produto', 'Valor'])
+        st.markdown(f"### 📝 Selecionar Produtos ({len(resultado_lista)} produtos)")
+        render_cards_with_selection(resultado_lista[["Produto", "Mercado", "Valor", "produto_norm"]])
+
+with tab3:
+    if 'selected_products' not in st.session_state or not st.session_state.selected_products:
+        st.markdown("""
+        <div style="text-align: center; padding: 40px; background: var(--card); border-radius: 15px; margin: 20px 0;">
+            <h3 style="color: var(--muted);">🛒 Sua lista está vazia</h3>
+            <p style="color: var(--muted);">Vá para "Minha Lista" e selecione os produtos que deseja comprar.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        selected_products = st.session_state.selected_products
+        total_value = sum(item['Valor'] for item in selected_products)
+        
+        # Card com valor total
+        st.markdown(f"""
+        <div class="total-card">
+            <span class="total-value">{format_brl(total_value)}</span>
+            <div class="total-label">Total da Compra</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Lista dos produtos selecionados
+        st.markdown(f"### 🛒 Seus Produtos ({len(selected_products)} itens)")
+        
+        for i, item in enumerate(selected_products):
+            col1, col2 = st.columns([0.9, 0.1])
+            
+            with col1:
+                st.markdown(f"""
+                <div class="product-card">
+                    <div class="product-name">{item['Produto']}</div>
+                    <div class="supplier-info">
+                        <span class="supplier-label">Comprar em</span>
+                        <span style="color: var(--muted); font-size: 1.05rem; font-weight: 500;">{item['Mercado']}</span>
+                    </div>
+                    <div class="price-container">
+                        <span class="price-value">{format_brl(item['Valor'])}</span>
+                        <span class="available-badge">✅ Selecionado</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                if st.button("🗑", key=f"remove_{i}", help="Remover item"):
+                    st.session_state.selected_products.remove(item)
+                    st.rerun()
 
 st.markdown("---")
 st.markdown("""
