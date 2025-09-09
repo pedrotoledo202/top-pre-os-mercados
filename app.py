@@ -8,8 +8,8 @@ import streamlit as st
 # CONFIG GERAL + TEMA
 # =========================
 st.set_page_config(
-    page_title="Super Preços", 
-    page_icon="🛒", 
+    page_title="TOP Preços", 
+    page_icon="🏆", 
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -22,7 +22,7 @@ BG = "#1C1C1C"           # Fundo escuro
 CARD = "#2A2A2A"         # Cards em cinza escuro
 TEXT = "#FFFFFF"         # Texto branco
 MUTED = "#B0B0B0"        # Texto mais suave
-ECONOMY = "#4CAF50"      # Verde para melhor preço
+ECONOMY = "#4CAF50"      # Verde para disponível
 
 # URL da planilha atualizada
 DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTQuWn9iSZkiuiaA5--9CSqfJ6NBxrCK_ClWfKH_es49sSWQkVEvkIB0h6Ow0EKZkHBwhN7IveSW7LR/pub?gid=1059501700&single=true&output=csv"
@@ -151,7 +151,7 @@ html, body, [data-testid="stAppViewContainer"] {{
   border: 1px solid rgba(74, 144, 164, 0.3);
 }}
 
-.best-price-badge {{
+.available-badge {{
   background: var(--economy);
   color: white;
   padding: 5px 10px;
@@ -275,7 +275,7 @@ def render_cards_mobile(df_view: pd.DataFrame):
             </div>
             <div class="price-container">
                 <span class="price-value">{format_brl(row['Valor'])}</span>
-                <span class="best-price-badge">🏆 Melhor Preço</span>
+                <span class="available-badge">✅ Disponível</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -286,7 +286,7 @@ def render_cards_mobile(df_view: pd.DataFrame):
 
 st.markdown("""
 <div class="main-header">
-    <h1>🛒 Super Preços</h1>
+    <h1>🏆 TOP Preços</h1>
     <div class="subtitle">Compare preços entre supermercados e economize</div>
 </div>
 """, unsafe_allow_html=True)
@@ -332,7 +332,7 @@ else:
     # Ordenar por produto e depois por preço
     resultado = resultado.sort_values(['Produto', 'Valor'])
     
-    st.markdown(f"### 📋 Melhores Preços ({len(resultado)} produtos)")
+    st.markdown(f"### 📋 Lista de Preços ({len(resultado)} produtos)")
     render_cards_mobile(resultado[["Produto", "Mercado", "Valor", "produto_norm"]])
 
 st.markdown("---")
